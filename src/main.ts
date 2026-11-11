@@ -43,7 +43,6 @@ const JUMP = 690;
 const MAX_FALL = 1050;
 const COYOTE_TIME = 0.095;
 const JUMP_BUFFER = 0.12;
-const SAVE_KEY = 'the-last-visitor-arcade-v1';
 
 const levels: Level[] = [
   {
@@ -177,13 +176,13 @@ const levels: Level[] = [
   },
 ];
 
-function coinLine(points: number[][]): Coin[] {
+function coinLine(points: Array<[number, number]>): Coin[] {
   return points.map(([x, y], i) => ({ x, y, w: 18, h: 18, collected: false, phase: i * 0.7 }));
 }
 
 let state: GameState = 'title';
 let levelIndex = 0;
-let level: Level = levels[0];
+let level: Level = levels[0]!;
 let player: Player = makePlayer(level.spawn);
 let cameraX = 0;
 let score = 0;
@@ -236,7 +235,7 @@ function makePlayer(spawn: Vec): Player {
 }
 
 function resetLevel(preserveLives = true): void {
-  level = cloneLevel(levels[levelIndex]);
+  level = cloneLevel(levels[levelIndex]!);
   const lives = preserveLives ? player.lives : 3;
   player = makePlayer(level.spawn);
   player.lives = lives;
