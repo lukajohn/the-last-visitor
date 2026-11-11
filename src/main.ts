@@ -1,658 +1,688 @@
-type SceneId = 'bedroom' | 'office' | 'interview' | 'reconstruction';
-type EvidenceKind = 'DOCUMENT' | 'MEDICAL' | 'FINANCIAL' | 'TESTIMONY' | 'PHOTOGRAPH' | 'ARCHIVE';
-type Evidence = {
-  id: string;
-  title: string;
-  kind: EvidenceKind;
-  date: string;
-  summary: string;
-  detail: string;
-  source: string;
-};
-type Hotspot = { id: string; x: number; y: number; w: number; h: number; label: string; evidenceId?: string; description?: string };
-type SaveData = {
-  version: number;
-  scene: SceneId;
-  collected: string[];
-  deductions: string[];
-  dialogueFlags: string[];
-  presence: number;
-  ended: boolean;
-  soundEnabled: boolean;
+type GameState = 'title' | 'playing' | 'paused' | 'gameover' | 'win';
+
+type Vec = { x: number; y: number };
+type Rect = { x: number; y: number; w: number; h: number };
+
+type Player = Rect & {
+  vx: number;
+  vy: number;
+  grounded: boolean;
+  coyote: number;
+  jumpBuffer: number;
+  invuln: number;
+  coins: number;
+  lives: number;
+  power: number;
+  facing: 1 | -1;
+  spawn: Vec;
 };
 
-const SAVE_KEY = 'the-last-visitor-save-v1';
-const VERSION = 1;
-const W = 480;
-const H = 270;
+type Enemy = Rect & { vx: number; minX: number; maxX: number; alive: boolean };
+type Coin = Rect & { collected: boolean; phase: number };
+type PowerUp = Rect & { collected: boolean; vy: number };
+type Level = {
+  name: string;
+  subtitle: string;
+  width: number;
+  platforms: Rect[];
+  hazards: Rect[];
+  enemies: Enemy[];
+  coins: Coin[];
+  powerups: PowerUp[];
+  exit: Rect;
+  spawn: Vec;
+  sky: string;
+};
 
-const evidence: Evidence[] = [
+const W = 960;
+const H = 540;
+
+const GRAVITY = 1900;
+const RUN = 285;
+const JUMP = 690;
+const MAX_FALL = 1050;
+const COYOTE_TIME = 0.095;
+const JUMP_BUFFER = 0.12;
+
+const levels: Level[] = [
   {
-    id: 'letter', title: 'The Unsent Letter', kind: 'DOCUMENT', date: 'OCT 29, 1966',
-    summary: 'A letter drafted but never mailed. Its timeline does not quite agree with the account given to police.',
-    detail: 'The note is brief, almost domestic in tone. A sentence near the bottom mentions that a visitor was expected before supper — earlier than the time later given in the official account. The envelope is still blank.',
-    source: 'Bedroom · writing desk',
+    name: 'THE RAINY STREET',
+    subtitle: 'RUN BEFORE THE LIGHTS GO OUT',
+    width: 4800,
+    sky: '#111827',
+    spawn: { x: 90, y: 360 },
+    platforms: [
+      { x: 0, y: 475, w: 800, h: 65 }, { x: 900, y: 475, w: 620, h: 65 },
+      { x: 1630, y: 430, w: 420, h: 110 }, { x: 2160, y: 475, w: 760, h: 65 },
+      { x: 3060, y: 410, w: 400, h: 130 }, { x: 3600, y: 475, w: 760, h: 65 },
+      { x: 4500, y: 420, w: 300, h: 120 },
+      { x: 300, y: 350, w: 170, h: 24 }, { x: 590, y: 285, w: 150, h: 24 },
+      { x: 1120, y: 330, w: 180, h: 24 }, { x: 1380, y: 260, w: 120, h: 24 },
+      { x: 1780, y: 335, w: 140, h: 24 }, { x: 2310, y: 345, w: 170, h: 24 },
+      { x: 2660, y: 275, w: 170, h: 24 }, { x: 3190, y: 315, w: 130, h: 24 },
+      { x: 3820, y: 350, w: 170, h: 24 }, { x: 4140, y: 285, w: 140, h: 24 },
+    ],
+    hazards: [
+      { x: 800, y: 505, w: 100, h: 35 }, { x: 1520, y: 505, w: 110, h: 35 },
+      { x: 2050, y: 505, w: 110, h: 35 }, { x: 2920, y: 505, w: 140, h: 35 },
+      { x: 3460, y: 505, w: 140, h: 35 }, { x: 4360, y: 505, w: 140, h: 35 },
+    ],
+    enemies: [
+      { x: 520, y: 435, w: 34, h: 40, vx: 62, minX: 470, maxX: 740, alive: true },
+      { x: 1180, y: 290, w: 32, h: 40, vx: -65, minX: 1120, maxX: 1300, alive: true },
+      { x: 1770, y: 390, w: 34, h: 40, vx: 58, minX: 1650, maxX: 2020, alive: true },
+      { x: 2480, y: 435, w: 34, h: 40, vx: -70, minX: 2240, maxX: 2860, alive: true },
+      { x: 3210, y: 275, w: 32, h: 40, vx: 65, minX: 3190, maxX: 3320, alive: true },
+      { x: 3890, y: 435, w: 34, h: 40, vx: 75, minX: 3660, maxX: 4260, alive: true },
+    ],
+    coins: coinLine([
+      [240, 320], [340, 300], [440, 320], [620, 235], [720, 235],
+      [1010, 425], [1120, 295], [1220, 295], [1390, 225], [1790, 300],
+      [1880, 300], [2340, 310], [2440, 310], [2680, 240], [2770, 240],
+      [3180, 280], [3260, 280], [3830, 315], [3930, 315], [4150, 250],
+      [4620, 360],
+    ]),
+    powerups: [{ x: 1410, y: 210, w: 26, h: 26, collected: false, vy: 0 }],
+    exit: { x: 4635, y: 340, w: 52, h: 80 },
   },
   {
-    id: 'photo', title: 'A Familiar Face', kind: 'PHOTOGRAPH', date: 'UNDATED',
-    summary: 'A faded photograph shows the same man beside a woman who is not the deceased.',
-    detail: 'The photograph has no caption. On the reverse, in blue pencil: “A good day. Before everything changed.” The man is identifiable from other photographs in the file. It suggests a longer history than the current case first appeared to have.',
-    source: 'Bedroom · bedside cabinet',
+    name: 'THE EMPTY HOUSE',
+    subtitle: 'SOMEONE IS STILL INSIDE',
+    width: 5200,
+    sky: '#241923',
+    spawn: { x: 80, y: 360 },
+    platforms: [
+      { x: 0, y: 475, w: 650, h: 65 }, { x: 760, y: 475, w: 700, h: 65 },
+      { x: 1560, y: 390, w: 430, h: 150 }, { x: 2100, y: 475, w: 720, h: 65 },
+      { x: 2940, y: 365, w: 500, h: 175 }, { x: 3520, y: 475, w: 680, h: 65 },
+      { x: 4300, y: 400, w: 900, h: 140 },
+      { x: 280, y: 340, w: 150, h: 24 }, { x: 510, y: 265, w: 130, h: 24 },
+      { x: 860, y: 330, w: 170, h: 24 }, { x: 1170, y: 255, w: 160, h: 24 },
+      { x: 1630, y: 300, w: 140, h: 24 }, { x: 1810, y: 235, w: 140, h: 24 },
+      { x: 2250, y: 345, w: 150, h: 24 }, { x: 2550, y: 275, w: 150, h: 24 },
+      { x: 3070, y: 285, w: 150, h: 24 }, { x: 3280, y: 225, w: 130, h: 24 },
+      { x: 3640, y: 350, w: 150, h: 24 }, { x: 3900, y: 285, w: 150, h: 24 },
+      { x: 4420, y: 320, w: 160, h: 24 }, { x: 4700, y: 260, w: 160, h: 24 },
+    ],
+    hazards: [
+      { x: 650, y: 505, w: 110, h: 35 }, { x: 1460, y: 505, w: 100, h: 35 },
+      { x: 1990, y: 505, w: 110, h: 35 }, { x: 2820, y: 505, w: 120, h: 35 },
+      { x: 3440, y: 505, w: 80, h: 35 }, { x: 4200, y: 505, w: 100, h: 35 },
+    ],
+    enemies: [
+      { x: 430, y: 435, w: 34, h: 40, vx: 75, minX: 260, maxX: 610, alive: true },
+      { x: 900, y: 290, w: 32, h: 40, vx: -70, minX: 850, maxX: 1020, alive: true },
+      { x: 1680, y: 350, w: 36, h: 40, vx: 72, minX: 1570, maxX: 1960, alive: true },
+      { x: 2350, y: 435, w: 34, h: 40, vx: 85, minX: 2150, maxX: 2740, alive: true },
+      { x: 3100, y: 245, w: 32, h: 40, vx: -65, minX: 3070, maxX: 3220, alive: true },
+      { x: 3650, y: 435, w: 34, h: 40, vx: 80, minX: 3550, maxX: 4160, alive: true },
+      { x: 4490, y: 360, w: 36, h: 40, vx: -75, minX: 4420, maxX: 5050, alive: true },
+    ],
+    coins: coinLine([
+      [300, 310], [390, 310], [520, 235], [600, 235], [900, 300], [1010, 300],
+      [1180, 225], [1280, 225], [1640, 270], [1730, 270], [1820, 205], [1910, 205],
+      [2280, 315], [2380, 315], [2570, 245], [2660, 245], [3090, 255], [3190, 255],
+      [3300, 195], [3680, 320], [3780, 320], [3920, 255], [4020, 255], [4450, 290],
+      [4560, 290], [4720, 230], [4820, 230], [5000, 350],
+    ]),
+    powerups: [{ x: 2600, y: 235, w: 26, h: 26, collected: false, vy: 0 }],
+    exit: { x: 5070, y: 320, w: 52, h: 80 },
   },
   {
-    id: 'policy', title: 'Policy Amendment', kind: 'FINANCIAL', date: 'SEP 14, 1966',
-    summary: 'A beneficiary amendment was filed several weeks before the death.',
-    detail: 'The document records a change to a life-insurance policy. The amendment is not proof of a crime, but it establishes a possible financial motive and a date worth comparing with the other records.',
-    source: 'Bedroom · document folder',
-  },
-  {
-    id: 'medical', title: 'Hospital Summary', kind: 'MEDICAL', date: 'NOV 03, 1966',
-    summary: 'A physician recorded an unexplained episode of profound hypoglycemia.',
-    detail: 'The summary describes a sudden, severe metabolic emergency and notes that the cause was not established at admission. The record does not identify who — if anyone — caused it. A later review would be needed to understand the finding in context.',
-    source: 'Bedroom · medical envelope',
-  },
-  {
-    id: 'neighbor', title: 'Statement: Mrs. Bell', kind: 'TESTIMONY', date: 'NOV 05, 1966',
-    summary: 'A neighbor remembers seeing a visitor arrive earlier than the husband reported.',
-    detail: '“I remember the car because its left headlamp was dim. It was still light out when it turned into the drive.” The statement gives no identity with certainty, but it places an unaccounted-for visitor at the house earlier in the evening.',
-    source: 'Bedroom · telephone message pad',
-  },
-  {
-    id: 'clipping', title: 'An Older Obituary', kind: 'ARCHIVE', date: '1947',
-    summary: 'A newspaper clipping records an earlier death connected to the same social circle.',
-    detail: 'The short obituary is easy to overlook. A name in the surviving correspondence links the deceased to a man later investigated in other suspicious deaths. The clipping is a lead, not a verdict; dates and testimony still need to be checked.',
-    source: 'Bedroom · newspaper drawer',
+    name: 'THE LAST DOOR',
+    subtitle: "DON'T LOOK BACK",
+    width: 5600,
+    sky: '#100f18',
+    spawn: { x: 90, y: 360 },
+    platforms: [
+      { x: 0, y: 475, w: 900, h: 65 }, { x: 1010, y: 475, w: 650, h: 65 },
+      { x: 1760, y: 420, w: 500, h: 120 }, { x: 2360, y: 475, w: 600, h: 65 },
+      { x: 3060, y: 385, w: 480, h: 155 }, { x: 3640, y: 475, w: 620, h: 65 },
+      { x: 4380, y: 405, w: 420, h: 135 }, { x: 4920, y: 475, w: 680, h: 65 },
+      { x: 330, y: 340, w: 180, h: 24 }, { x: 620, y: 270, w: 150, h: 24 },
+      { x: 1130, y: 335, w: 160, h: 24 }, { x: 1390, y: 255, w: 150, h: 24 },
+      { x: 1830, y: 325, w: 150, h: 24 }, { x: 2070, y: 250, w: 130, h: 24 },
+      { x: 2440, y: 345, w: 150, h: 24 }, { x: 2680, y: 275, w: 150, h: 24 },
+      { x: 3130, y: 300, w: 140, h: 24 }, { x: 3340, y: 235, w: 130, h: 24 },
+      { x: 3720, y: 350, w: 150, h: 24 }, { x: 3970, y: 275, w: 150, h: 24 },
+      { x: 4450, y: 320, w: 140, h: 24 }, { x: 4660, y: 255, w: 130, h: 24 },
+      { x: 5050, y: 350, w: 150, h: 24 }, { x: 5320, y: 275, w: 140, h: 24 },
+    ],
+    hazards: [
+      { x: 900, y: 505, w: 110, h: 35 }, { x: 1660, y: 505, w: 100, h: 35 },
+      { x: 2260, y: 505, w: 100, h: 35 }, { x: 2960, y: 505, w: 100, h: 35 },
+      { x: 3540, y: 505, w: 100, h: 35 }, { x: 4260, y: 505, w: 120, h: 35 },
+      { x: 4800, y: 505, w: 120, h: 35 },
+    ],
+    enemies: [
+      { x: 600, y: 435, w: 34, h: 40, vx: 80, minX: 420, maxX: 820, alive: true },
+      { x: 1210, y: 295, w: 32, h: 40, vx: -72, minX: 1130, maxX: 1290, alive: true },
+      { x: 1860, y: 380, w: 36, h: 40, vx: 75, minX: 1780, maxX: 2220, alive: true },
+      { x: 2500, y: 435, w: 34, h: 40, vx: -90, minX: 2400, maxX: 2890, alive: true },
+      { x: 3170, y: 265, w: 32, h: 40, vx: 75, minX: 3130, maxX: 3270, alive: true },
+      { x: 3760, y: 435, w: 34, h: 40, vx: 85, minX: 3670, maxX: 4180, alive: true },
+      { x: 4490, y: 365, w: 36, h: 40, vx: -80, minX: 4400, maxX: 4770, alive: true },
+      { x: 5120, y: 435, w: 34, h: 40, vx: 90, minX: 4970, maxX: 5510, alive: true },
+    ],
+    coins: coinLine([
+      [350, 310], [450, 310], [650, 235], [740, 235], [1140, 305], [1240, 305],
+      [1400, 220], [1490, 220], [1840, 295], [1940, 295], [2080, 215], [2170, 215],
+      [2460, 315], [2560, 315], [2700, 245], [2800, 245], [3150, 270], [3250, 270],
+      [3360, 205], [3750, 320], [3850, 320], [3990, 245], [4080, 245], [4470, 290],
+      [4570, 290], [4680, 225], [5070, 315], [5170, 315], [5340, 245], [5430, 245],
+    ]),
+    powerups: [{ x: 2700, y: 235, w: 26, h: 26, collected: false, vy: 0 }],
+    exit: { x: 5480, y: 395, w: 60, h: 80 },
   },
 ];
 
-const hotspots: Hotspot[] = [
-  { id: 'desk', x: 54, y: 148, w: 105, h: 73, label: 'Writing desk', evidenceId: 'letter' },
-  { id: 'cabinet', x: 350, y: 145, w: 73, h: 76, label: 'Bedside cabinet', evidenceId: 'photo' },
-  { id: 'folder', x: 186, y: 174, w: 62, h: 37, label: 'Document folder', evidenceId: 'policy' },
-  { id: 'envelope', x: 276, y: 178, w: 58, h: 33, label: 'Medical envelope', evidenceId: 'medical' },
-  { id: 'phone', x: 82, y: 111, w: 37, h: 34, label: 'Telephone message pad', evidenceId: 'neighbor' },
-  { id: 'drawer', x: 346, y: 111, w: 75, h: 31, label: 'Newspaper drawer', evidenceId: 'clipping' },
-];
+function coinLine(points: Array<[number, number]>): Coin[] {
+  return points.map(([x, y], i) => ({ x, y, w: 18, h: 18, collected: false, phase: i * 0.7 }));
+}
 
-const deductions = [
-  { id: 'timeline', title: 'A TIMELINE THAT DOESN’T HOLD', description: 'The letter and the neighbor’s statement place an unaccounted-for visitor at the house earlier than the official account suggests.', pair: ['letter', 'neighbor'] },
-  { id: 'motive', title: 'A FINANCIAL INTEREST', description: 'The policy amendment and the unsent letter establish a possible financial motive and a reason to examine the dates closely.', pair: ['policy', 'letter'] },
-  { id: 'pattern', title: 'A PATTERN WORTH EXAMINING', description: 'The hospital summary and older obituary connect the present death to a wider set of suspicious circumstances. They justify further investigation, not a conclusion by themselves.', pair: ['medical', 'clipping'] },
-] as const;
+let state: GameState = 'title';
+let levelIndex = 0;
+let level: Level = levels[0]!;
+let player: Player = makePlayer(level.spawn);
+let cameraX = 0;
+let score = 0;
+let totalCoins = 0;
+let elapsed = 0;
+let lastTime = performance.now();
+let keys = new Set<string>();
+let touchLeft = false;
+let touchRight = false;
+let touchJump = false;
+let audioEnabled = false;
+let audio: AudioContext | null = null;
 
-const app = document.querySelector<HTMLDivElement>('#app');
-if (!app) throw new Error('Application root #app was not found.');
-
+const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
-  <div class="game-shell">
-    <header class="topbar">
-      <a class="wordmark" href="#home" aria-label="The Last Visitor home"><span class="mark">LV</span><span>THE LAST VISITOR</span></a>
-      <div class="case-meta"><span class="live-dot"></span><span>CASE 06—11—67</span><span class="meta-divider">/</span><span id="chapter-label">THE BEDROOM</span></div>
-      <div class="top-actions"><button class="icon-button" id="sound-toggle" aria-label="Toggle sound" title="Toggle sound">◖</button><button class="icon-button" id="help-button" aria-label="Controls" title="Controls">?</button></div>
+  <div class="arcade">
+    <header class="hud">
+      <div class="brand"><span class="brand-mark">LV</span><span>THE LAST VISITOR</span></div>
+      <div class="level-name" id="level-name">THE RAINY STREET</div>
+      <div class="hud-right"><span id="score">000000</span><span class="coin-hud">● <b id="coins">00</b></span><span id="lives">♥♥♥</span><button id="sound" class="hud-btn" aria-label="Toggle sound">♫</button></div>
     </header>
-    <main id="game-main">
-      <section class="title-screen" id="title-screen">
-        <div class="title-backdrop"><div class="rain-layer"></div><div class="window-glow"></div><div class="title-shadow"></div></div>
-        <div class="title-content">
-          <p class="eyebrow">A CASE FILE IN SIX MOVEMENTS</p>
-          <h1>THE LAST<br><em>VISITOR</em></h1>
-          <p class="title-subtitle">Some doors should never have been opened.</p>
-          <div class="title-rule"></div>
-          <p class="title-copy">CALIFORNIA, 1967<br>A death has been called an accident.<br>The details disagree.</p>
-          <div class="title-actions"><button class="primary-button" id="new-game">OPEN THE CASE <span>↗</span></button><button class="text-button" id="continue-game">CONTINUE FILE</button></div>
-          <p class="title-foot">A WORK OF HISTORICAL FICTION · SOUND OPTIONAL</p>
+    <main class="game-wrap">
+      <canvas id="game-canvas" width="960" height="540" aria-label="The Last Visitor arcade platform game"></canvas>
+      <div class="scanlines"></div>
+      <div class="overlay" id="overlay">
+        <div class="panel title-panel">
+          <p class="kicker">AN ORIGINAL ARCADE PLATFORMER</p>
+          <h1>THE LAST<br><i>VISITOR</i></h1>
+          <p class="tagline">RUN. JUMP. DON'T LET IT CATCH YOU.</p>
+          <button id="start" class="arcade-button">START GAME <span>→</span></button>
+          <p class="controls-copy">A / D or ← / → to move · SPACE / W / ↑ to jump<br>Stomp enemies · collect coins · reach the door</p>
         </div>
-        <div class="title-credit">AN INTERACTIVE DETECTIVE STORY <span>—</span> VOL. 01</div>
-      </section>
-      <section class="play-screen hidden" id="play-screen">
-        <div class="chapter-strip"><div><span class="chapter-number" id="chapter-number">01</span><span class="chapter-name" id="chapter-name">THE BEDROOM</span></div><span class="chapter-date" id="chapter-date">NOVEMBER 06, 1966 · 11:42 PM</span></div>
-        <div class="stage-wrap">
-          <div class="canvas-frame"><canvas id="game-canvas" width="960" height="540" aria-label="Interactive pixel-art investigation scene"></canvas><div class="canvas-grain"></div><div class="scene-caption" id="scene-caption">Click an object to examine it.</div><div class="presence-indicator" id="presence-indicator"><span></span> SOMETHING IS OUT OF PLACE</div></div>
-          <aside class="case-sidebar">
-            <div class="sidebar-head"><span class="eyebrow">INVESTIGATION</span><span class="file-number">NO. 0067</span></div>
-            <div class="progress-block"><div class="progress-label"><span>CASE PROGRESS</span><b id="progress-count">0 / 6</b></div><div class="progress-track"><i id="progress-fill"></i></div></div>
-            <div class="sidebar-section"><div class="section-heading">CURRENT OBJECTIVE <span>↘</span></div><p id="objective-text">Search the bedroom. Six details may help explain the final hours.</p></div>
-            <div class="sidebar-section clue-list-section"><div class="section-heading">CASE FILE <span id="clue-count">00 ITEMS</span></div><div class="mini-evidence-list" id="mini-evidence-list"><p class="empty-list">No evidence collected.</p></div></div>
-            <div class="sidebar-bottom"><button class="sidebar-button" id="journal-button">JOURNAL <span>J</span></button><button class="sidebar-button" id="board-button">EVIDENCE BOARD <span>B</span></button></div>
-          </aside>
-        </div>
-        <div class="bottom-bar"><div class="scene-hint"><span class="hint-dot"></span><span id="bottom-hint">Examine the room. The smallest details matter.</span></div><div class="bottom-actions"><button class="quiet-button" id="back-button">← TITLE</button><button class="primary-button small" id="advance-button" disabled>RETURN TO OFFICE <span>↗</span></button></div></div>
-      </section>
+      </div>
+      <div class="touch-controls" aria-hidden="true">
+        <button data-touch="left">◀</button><button data-touch="right">▶</button><button data-touch="jump">▲</button>
+      </div>
     </main>
-    <footer class="site-footer"><span>THE LAST VISITOR <span class="footer-sep">/</span> A FICTIONALIZED INVESTIGATION</span><span>BEST EXPERIENCED WITH HEADPHONES · 16:9</span></footer>
+    <footer class="footer"><span>3 WORLDS · 1 RUN · 0 CHECKPOINTS TO HIDE BEHIND</span><span>© THE LAST VISITOR</span></footer>
   </div>
-  <div class="modal-layer hidden" id="modal-layer" role="presentation"><section class="modal-card" id="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-close" id="modal-close" aria-label="Close">×</button><div id="modal-content"></div></section></div>
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 `;
 
-const canvas = document.querySelector<HTMLCanvasElement>('#game-canvas')!;
-const ctx = canvas.getContext('2d', { alpha: false })!;
-ctx.imageSmoothingEnabled = false;
-const $ = <T extends HTMLElement>(selector: string): T => {
-  const el = document.querySelector<T>(selector);
-  if (!el) throw new Error(`Missing UI element: ${selector}`);
-  return el;
-};
+const gameCanvas = document.querySelector<HTMLCanvasElement>('#game-canvas')!;
+gameCanvas.width = W;
+gameCanvas.height = H;
+const g = gameCanvas.getContext('2d')!;
+g.imageSmoothingEnabled = false;
 
-let currentScene: SceneId = 'bedroom';
-let collected = new Set<string>();
-let completedDeductions = new Set<string>();
-let dialogueFlags = new Set<string>();
-let presence = 0;
-let hoveredHotspot: string | null = null;
-let selectedEvidence: string[] = [];
-let modalOpen = false;
-let soundEnabled = false;
-let audioContext: AudioContext | null = null;
-let rainNode: AudioBufferSourceNode | null = null;
-let rainGain: GainNode | null = null;
-let ended = false;
-let animationFrame = 0;
-let lastFrame = 0;
-let elapsed = 0;
-let toastTimer = 0;
-let titleContinueAvailable = false;
-
-function showToast(message: string): void {
-  const toast = $('#toast');
-  toast.textContent = message;
-  toast.classList.add('visible');
-  window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toast.classList.remove('visible'), 2800);
+function makePlayer(spawn: Vec): Player {
+  return { x: spawn.x, y: spawn.y, w: 30, h: 42, vx: 0, vy: 0, grounded: false, coyote: 0, jumpBuffer: 0, invuln: 0, coins: 0, lives: 3, power: 0, facing: 1, spawn: { ...spawn } };
 }
 
-function openModal(content: string): void {
-  $('#modal-content').innerHTML = content;
-  $('#modal-layer').classList.remove('hidden');
-  modalOpen = true;
-  document.body.classList.add('modal-active');
-}
-function closeModal(): void {
-  $('#modal-layer').classList.add('hidden');
-  modalOpen = false;
-  document.body.classList.remove('modal-active');
-  selectedEvidence = [];
-  renderSidebar();
+function resetLevel(preserveLives = true): void {
+  level = cloneLevel(levels[levelIndex]!);
+  const lives = preserveLives ? player.lives : 3;
+  player = makePlayer(level.spawn);
+  player.lives = lives;
+  player.coins = 0;
+  cameraX = 0;
 }
 
-function persist(): void {
-  const save: SaveData = { version: VERSION, scene: currentScene, collected: [...collected], deductions: [...completedDeductions], dialogueFlags: [...dialogueFlags], presence, ended, soundEnabled };
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch { showToast('This browser could not save the case file.'); }
-}
-function loadSave(): SaveData | null {
-  try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw) as Partial<SaveData>;
-    if (data.version !== VERSION || !Array.isArray(data.collected) || !Array.isArray(data.deductions)) return null;
-    return {
-      version: VERSION,
-      scene: ['bedroom', 'office', 'interview', 'reconstruction'].includes(String(data.scene)) ? data.scene as SceneId : 'bedroom',
-      collected: data.collected.filter((id): id is string => evidence.some((item) => item.id === id)),
-      deductions: data.deductions.filter((id): id is string => deductions.some((item) => item.id === id)),
-      dialogueFlags: Array.isArray(data.dialogueFlags) ? data.dialogueFlags.filter((flag): flag is string => typeof flag === 'string') : [],
-      presence: typeof data.presence === 'number' ? Math.max(0, Math.min(10, data.presence)) : 0,
-      ended: Boolean(data.ended),
-      soundEnabled: Boolean(data.soundEnabled),
-    };
-  } catch {
-    localStorage.removeItem(SAVE_KEY);
-    return null;
-  }
+function cloneLevel(src: Level): Level {
+  return {
+    ...src,
+    platforms: src.platforms.map(r => ({ ...r })),
+    hazards: src.hazards.map(r => ({ ...r })),
+    enemies: src.enemies.map(e => ({ ...e })),
+    coins: src.coins.map(c => ({ ...c })),
+    powerups: src.powerups.map(p => ({ ...p })),
+    spawn: { ...src.spawn },
+    exit: { ...src.exit },
+  };
 }
 
-function renderSidebar(): void {
-  $('#progress-count').textContent = `${collected.size} / ${evidence.length}`;
-  $('#clue-count').textContent = `${String(collected.size).padStart(2, '0')} ITEMS`;
-  $('#progress-fill').setAttribute('style', `width:${(collected.size / evidence.length) * 100}%`);
-  const list = $('#mini-evidence-list');
-  if (!collected.size) list.innerHTML = '<p class="empty-list">No evidence collected.</p>';
-  else list.innerHTML = [...collected].map((id) => {
-    const item = evidence.find((entry) => entry.id === id)!;
-    return `<button class="mini-evidence" data-evidence="${item.id}"><span class="mini-type">${item.kind.slice(0, 3)}</span><span>${item.title}</span><i>↗</i></button>`;
-  }).join('');
-  list.querySelectorAll<HTMLButtonElement>('[data-evidence]').forEach((button) => button.addEventListener('click', () => inspectEvidence(button.dataset.evidence!)));
-  const objective = currentScene === 'bedroom'
-    ? 'Find at least three details before returning to the office. The full set may change what you can prove.'
-    : currentScene === 'office'
-      ? completedDeductions.size === 3 ? 'All three connections are established. Review the file, then question Archerd.' : `Connect evidence on the board. ${completedDeductions.size} of 3 deductions established.`
-      : currentScene === 'interview' ? 'Put the contradictions to Archerd. Ask about the timeline, the policy, and the medical record.'
-      : 'Review what the evidence can — and cannot — establish.';
-  $('#objective-text').textContent = objective;
-  const canAdvance = currentScene === 'bedroom' ? collected.size >= 3 : currentScene === 'office' || currentScene === 'interview';
-  $('#advance-button').toggleAttribute('disabled', !canAdvance);
-  $('#advance-button').innerHTML = currentScene === 'bedroom' ? 'RETURN TO OFFICE <span>↗</span>' : currentScene === 'office' ? 'BEGIN INTERVIEW <span>↗</span>' : currentScene === 'interview' ? (['timeline', 'motive', 'pattern'].every((flag) => dialogueFlags.has(`asked-${flag}`)) ? 'RECONSTRUCT THE CASE <span>↗</span>' : 'SUBMIT CURRENT FILE <span>↗</span>') : 'CASE REVIEW COMPLETE';
-  $('#chapter-label').textContent = currentScene.toUpperCase();
-  $('#chapter-name').textContent = currentScene === 'bedroom' ? 'THE BEDROOM' : currentScene === 'office' ? 'THE EVIDENCE ROOM' : currentScene === 'interview' ? 'THE INTERVIEW' : 'THE RECONSTRUCTION';
-  $('#chapter-number').textContent = currentScene === 'bedroom' ? '01' : currentScene === 'office' ? '02' : currentScene === 'interview' ? '03' : '04';
-  $('#chapter-date').textContent = currentScene === 'bedroom' ? 'NOVEMBER 06, 1966 · 11:42 PM' : currentScene === 'office' ? 'NOVEMBER 07, 1966 · 1:18 AM' : currentScene === 'interview' ? 'JULY 12, 1967 · 9:06 AM' : 'THE CASE FILE · RECONSTRUCTED';
-  $('#board-button').classList.toggle('active', currentScene === 'office');
+function rectsOverlap(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
-function inspectEvidence(id: string): void {
-  const item = evidence.find((entry) => entry.id === id);
-  if (!item) return;
-  const isCollected = collected.has(id);
-  openModal(`
-    <p class="eyebrow">EVIDENCE ${String(evidence.findIndex((entry) => entry.id === id) + 1).padStart(2, '0')} / ${item.kind}</p>
-    <h2 id="modal-title">${item.title}</h2>
-    <div class="evidence-meta"><span>${item.date}</span><span>${item.source}</span></div>
-    <p class="evidence-lede">${item.summary}</p>
-    <p class="evidence-detail">${item.detail}</p>
-    <div class="evidence-stamp">${isCollected ? 'ADDED TO CASE FILE' : 'UNVERIFIED LEAD'}</div>
-    <div class="modal-actions">${isCollected ? '<button class="primary-button" id="modal-done">CLOSE FILE <span>↗</span></button>' : '<button class="primary-button" id="collect-evidence">ADD TO CASE FILE <span>＋</span></button>'}</div>
-  `);
-  $('#modal-done')?.addEventListener('click', closeModal);
-  $('#collect-evidence')?.addEventListener('click', () => {
-    if (!collected.has(id)) {
-      collected.add(id);
-      presence = Math.min(10, presence + 1);
-      persist();
-      renderSidebar();
-      updatePresence();
-      showToast('Evidence recorded. The case file has been updated.');
-    }
-    closeModal();
-  });
+function inputLeft(): boolean { return keys.has('ArrowLeft') || keys.has('a') || touchLeft; }
+function inputRight(): boolean { return keys.has('ArrowRight') || keys.has('d') || touchRight; }
+
+function requestJump(): void {
+  if (state !== 'playing') return;
+  player.jumpBuffer = JUMP_BUFFER;
 }
 
-function updatePresence(): void {
-  const indicator = $('#presence-indicator');
-  indicator.classList.toggle('visible', presence >= 3);
-  if (presence === 3) showToast('A sound from the hallway. Then nothing.');
-  if (presence === 5) showToast('The telephone light is on. You do not remember turning it on.');
-}
+function update(dt: number): void {
+  if (state !== 'playing') return;
 
-function switchScene(scene: SceneId): void {
-  currentScene = scene;
-  hoveredHotspot = null;
-  $('#title-screen').classList.add('hidden');
-  $('#play-screen').classList.remove('hidden');
-  $('#scene-caption').textContent = scene === 'bedroom' ? 'Click an object to examine it.' : scene === 'office' ? 'The evidence is yours. The connections are not.' : scene === 'interview' ? 'Listen carefully. Present evidence when a statement does not fit.' : 'A reconstruction is not the same thing as certainty.';
-  $('#bottom-hint').textContent = scene === 'bedroom' ? 'Examine the room. The smallest details matter.' : scene === 'office' ? 'Select two evidence cards to test a connection.' : scene === 'interview' ? 'Ask carefully. A contradiction is more useful than an accusation.' : 'Separate what is documented from what is inferred.';
-  $('#advance-button').textContent = scene === 'bedroom' ? 'RETURN TO OFFICE ↗' : scene === 'office' ? 'BEGIN INTERVIEW ↗' : scene === 'interview' ? 'RECONSTRUCT THE CASE ↗' : 'CLOSE THE CASE ↗';
-  renderSidebar();
-  persist();
-  drawScene();
-}
+  elapsed += dt;
+  player.invuln = Math.max(0, player.invuln - dt);
+  player.jumpBuffer = Math.max(0, player.jumpBuffer - dt);
 
-function beginNewGame(): void {
-  collected = new Set(); completedDeductions = new Set(); dialogueFlags = new Set(); presence = 0; ended = false; currentScene = 'bedroom';
-  localStorage.removeItem(SAVE_KEY);
-  switchScene('bedroom');
-  openModal(`<p class="eyebrow">CASE ASSIGNMENT / NOVEMBER 06, 1966</p><h2 id="modal-title">A death without an explanation.</h2><p class="evidence-lede">The report says the woman died after a sudden medical emergency. Her husband says there is nothing unusual to investigate.</p><p class="evidence-detail">You have been asked to review the bedroom before the property is released. The house is quiet. Rain has been falling for hours. On the desk, a telephone message is still open — and the official timeline leaves a small gap.</p><div class="evidence-stamp">FIELD NOTE · DO NOT ASSUME</div><div class="modal-actions"><button class="primary-button" id="briefing-close">ENTER THE ROOM <span>↗</span></button></div>`);
-  $('#briefing-close').addEventListener('click', closeModal);
-}
-function continueGame(): void {
-  const save = loadSave();
-  if (!save) { showToast('No readable case file was found.'); return; }
-  collected = new Set(save.collected); completedDeductions = new Set(save.deductions); dialogueFlags = new Set(save.dialogueFlags); presence = save.presence; ended = save.ended; soundEnabled = save.soundEnabled;
-  updateSoundButton(); switchScene(save.scene); renderSidebar(); updatePresence();
-  if (save.scene === 'interview' && !save.ended) openInterview();
-  if (save.scene === 'reconstruction' && save.ended) showReconstruction();
-}
-
-function showTitle(): void {
-  $('#play-screen').classList.add('hidden');
-  $('#title-screen').classList.remove('hidden');
-  const save = loadSave();
-  titleContinueAvailable = Boolean(save);
-  $('#continue-game').classList.toggle('hidden', !titleContinueAvailable);
-  stopAudio();
-}
-
-function openBoard(): void {
-  selectedEvidence = [];
-  const cards = [...collected].map((id) => evidence.find((entry) => entry.id === id)!);
-  const connectionLines = completedDeductions.size ? `<div class="deduction-summary">${deductions.filter((d) => completedDeductions.has(d.id)).map((d) => `<div class="deduction-done"><span>✓</span><div><b>${d.title}</b><p>${d.description}</p></div></div>`).join('')}</div>` : '';
-  openModal(`
-    <p class="eyebrow">INVESTIGATION / WORKING THEORY</p><h2 id="modal-title">The evidence board</h2>
-    <p class="modal-intro">Select two cards to test a connection. A correct deduction will be recorded. A plausible theory is not the same as proof.</p>
-    <div class="board-count"><span>${cards.length} ITEMS IN THE FILE</span><span>${completedDeductions.size} / 3 CONNECTIONS</span></div>
-    <div class="board-grid" id="board-grid">${cards.map((card) => `<button class="board-card" data-card="${card.id}"><span class="card-type">${card.kind}</span><b>${card.title}</b><small>${card.date}</small><i class="card-select">＋</i></button>`).join('')}</div>
-    <div class="board-feedback" id="board-feedback">Choose two pieces of evidence to compare.</div>
-    ${connectionLines}
-    <div class="modal-actions"><button class="primary-button" id="board-close">RETURN TO FILE <span>↗</span></button></div>
-  `);
-  const grid = $('#board-grid');
-  grid.querySelectorAll<HTMLButtonElement>('[data-card]').forEach((button) => button.addEventListener('click', () => {
-    const id = button.dataset.card!;
-    if (selectedEvidence.includes(id)) selectedEvidence = selectedEvidence.filter((value) => value !== id);
-    else if (selectedEvidence.length < 2) selectedEvidence.push(id);
-    grid.querySelectorAll('[data-card]').forEach((node) => node.classList.toggle('selected', selectedEvidence.includes((node as HTMLElement).dataset.card!)));
-    const feedback = $('#board-feedback');
-    if (selectedEvidence.length === 2) evaluateConnection(feedback);
-    else feedback.textContent = 'Select one more piece of evidence.';
-  }));
-  $('#board-close').addEventListener('click', () => { closeModal(); renderSidebar(); drawScene(); });
-}
-
-function evaluateConnection(feedback: HTMLElement): void {
-  const pair = [...selectedEvidence].sort();
-  const match = deductions.find((d) => [...d.pair].sort().join('|') === pair.join('|'));
-  if (match) {
-    if (completedDeductions.has(match.id)) feedback.innerHTML = `<span class="feedback-good">ALREADY ESTABLISHED</span><br>${match.description}`;
-    else {
-      completedDeductions.add(match.id); presence = Math.min(10, presence + 1); persist(); renderSidebar(); updatePresence();
-      feedback.innerHTML = `<span class="feedback-good">CONNECTION ESTABLISHED · ${match.title}</span><br>${match.description}`;
-      showToast('A new deduction has been added to the board.');
-    }
+  const dir = (inputRight() ? 1 : 0) - (inputLeft() ? 1 : 0);
+  if (dir !== 0) {
+    player.vx += dir * 1850 * dt;
+    player.vx = Math.max(-RUN, Math.min(RUN, player.vx));
+    player.facing = dir as 1 | -1;
   } else {
-    feedback.innerHTML = '<span class="feedback-neutral">NO CLEAR CONNECTION</span><br>These records may still matter, but this pairing does not establish a deduction. Try another combination.';
+    player.vx *= Math.pow(0.0005, dt);
+    if (Math.abs(player.vx) < 2) player.vx = 0;
   }
-  selectedEvidence = [];
-  document.querySelectorAll('.board-card.selected').forEach((node) => node.classList.remove('selected'));
-  const counter = document.querySelector('.board-count span:last-child');
-  if (counter) counter.textContent = `${completedDeductions.size} / 3 CONNECTIONS`;
-}
 
-const interviewTopics = [
-  { id: 'timeline', title: 'The visitor’s timeline', unlock: 'timeline', line: 'You have a neighbor who remembers a car arriving before the time you gave the police. Your account places it later.', answer: 'Memory is an unreliable thing, detective. Especially after a death. People remember what they think they saw.', follow: 'Then we will keep the times separate until they can be checked.' },
-  { id: 'motive', title: 'The policy amendment', unlock: 'motive', line: 'A policy beneficiary was changed weeks before the death. You did not mention it when we first spoke.', answer: 'A private financial arrangement is not a confession. You have a document. You do not have an explanation.', follow: 'No. I have a date, a beneficiary, and a question you have not answered.' },
-  { id: 'pattern', title: 'The medical record', unlock: 'pattern', line: 'The hospital summary describes an unexplained medical emergency. There are earlier deaths in the wider file that deserve review.', answer: 'You are joining unrelated tragedies because you want them to form a pattern. That does not make the pattern real.', follow: 'That is why we are checking the records rather than guessing.' },
-];
+  if (player.grounded) player.coyote = COYOTE_TIME;
+  else player.coyote = Math.max(0, player.coyote - dt);
 
-function openInterview(): void {
-  renderInterview();
-}
-function renderInterview(): void {
-  const asked = interviewTopics.filter((topic) => dialogueFlags.has(`asked-${topic.id}`)).length;
-  openModal(`
-    <p class="eyebrow">INTERVIEW ROOM / RECORDED STATEMENT</p><h2 id="modal-title">William Dale Archerd</h2>
-    <div class="interview-portrait"><div class="portrait-head"><span></span></div><div class="portrait-caption"><b>W. D. ARCHERD</b><small>SUBJECT · 1967</small></div></div>
-    <div class="dialogue-transcript"><p class="speaker">ARCHERD</p><p>“I have answered these questions. My wife was ill. I was there. I do not know what else you expect me to say.”</p><p class="speaker investigator">YOU</p><p>“I expect the details to agree.”</p></div>
-    <div class="topic-progress"><span>LINES OF INQUIRY</span><b>${asked} / 3 EXAMINED</b></div>
-    <div class="topic-list" id="topic-list">${interviewTopics.map((topic) => {
-      const done = dialogueFlags.has(`asked-${topic.id}`); const unlocked = completedDeductions.has(topic.unlock);
-      return `<button class="topic-button ${done ? 'done' : ''}" data-topic="${topic.id}" ${unlocked ? '' : 'disabled'}><span>${done ? '✓' : unlocked ? '↗' : '—'}</span><b>${topic.title}</b><small>${done ? 'QUESTIONED' : unlocked ? 'PRESENT CONTRADICTION' : 'ESTABLISH THE DEDUCTION FIRST'}</small></button>`;
-    }).join('')}</div>
-    <div class="board-feedback" id="interview-feedback">${asked === 3 ? 'All three lines of inquiry have been explored.' : 'Use the evidence, not assumptions. Establish a deduction before challenging the statement.'}</div>
-    <div class="modal-actions"><button class="primary-button" id="interview-close">${asked === 3 ? 'FINISH INTERVIEW' : 'CLOSE INTERVIEW'} <span>↗</span></button></div>
-  `);
-  $('#topic-list').querySelectorAll<HTMLButtonElement>('[data-topic]').forEach((button) => button.addEventListener('click', () => {
-    const topic = interviewTopics.find((entry) => entry.id === button.dataset.topic)!;
-    dialogueFlags.add(`asked-${topic.id}`); persist();
-    const feedback = $('#interview-feedback');
-    feedback.innerHTML = `<div class="exchange"><span class="speaker investigator">YOU</span><p>“${topic.line}”</p><span class="speaker">ARCHERD</span><p>“${topic.answer}”</p><span class="speaker investigator">YOU</span><p>“${topic.follow}”</p></div>`;
-    button.classList.add('done'); button.innerHTML = `<span>✓</span><b>${topic.title}</b><small>QUESTIONED</small>`;
-    button.disabled = true;
-    const newAsked = interviewTopics.filter((entry) => dialogueFlags.has(`asked-${entry.id}`)).length;
-    $('.topic-progress b').textContent = `${newAsked} / 3 EXAMINED`;
-    renderSidebar();
-    if (newAsked === 3) $('#interview-close').textContent = 'FINISH INTERVIEW ↗';
-  }));
-  $('#interview-close').addEventListener('click', () => {
-    closeModal();
-    if (interviewTopics.every((topic) => dialogueFlags.has(`asked-${topic.id}`))) showToast('The interview is complete. The reconstruction can begin.');
-  });
-}
-
-function showJournal(): void {
-  const collectedList = [...collected].map((id) => evidence.find((entry) => entry.id === id)!);
-  openModal(`<p class="eyebrow">DETECTIVE’S NOTEBOOK</p><h2 id="modal-title">Investigation journal</h2><p class="modal-intro">A working record. Confirmed details, suspicions, and unanswered questions remain separate.</p><div class="journal-block"><span class="journal-label">ESTABLISHED RECORDS</span>${collectedList.length ? collectedList.map((item) => `<div class="journal-entry"><b>${item.title}</b><small>${item.kind} · ${item.date}</small><p>${item.summary}</p></div>`).join('') : '<p>No records have been added yet.</p>'}</div><div class="journal-block"><span class="journal-label">CURRENT DEDUCTIONS</span>${deductions.filter((d) => completedDeductions.has(d.id)).map((d) => `<div class="journal-entry"><b>${d.title}</b><p>${d.description}</p></div>`).join('') || '<p>No deductions established yet. Compare evidence on the board.</p>'}</div><div class="modal-actions"><button class="primary-button" id="journal-close">CLOSE JOURNAL ↗</button></div>`);
-  $('#journal-close').addEventListener('click', closeModal);
-}
-
-function showReconstruction(): void {
-  const complete = completedDeductions.size === 3 && interviewTopics.every((topic) => dialogueFlags.has(`asked-${topic.id}`));
-  const endingTitle = complete ? 'THE RECORD HOLDS' : 'AN INCOMPLETE FILE';
-  const endingCopy = complete
-    ? 'The contradictions have been documented. The timeline, financial record, and medical history are now part of a coherent evidentiary picture. The case can proceed to a full review. It is not a verdict. It is a case that can finally be examined.'
-    : 'Some questions remain unanswered. The surviving records point toward inconsistencies, but the gaps are too large to present a complete case. The file remains open. The people named in it deserve more than a theory.';
-  currentScene = 'reconstruction'; ended = true; persist();
-  openModal(`<p class="eyebrow">FINAL MOVEMENT / CASE REVIEW</p><h2 id="modal-title">${endingTitle}</h2><div class="reconstruction-art"><div class="art-window"></div><div class="art-lamp"></div><div class="art-rain"></div><span>THE NIGHT DOES NOT GIVE UP ITS SECRETS.</span></div><p class="ending-copy">${endingCopy}</p><div class="ending-stats"><div><b>${collected.size}/6</b><small>RECORDS FOUND</small></div><div><b>${completedDeductions.size}/3</b><small>DEDUCTIONS</small></div><div><b>${interviewTopics.filter((topic) => dialogueFlags.has(`asked-${topic.id}`)).length}/3</b><small>QUESTIONS</small></div></div><p class="historical-note"><b>HISTORICAL NOTE</b> This game uses a fictionalized investigation inspired by the public record surrounding William Dale Archerd. The documents, dialogue, bedroom, and detective are dramatized and are not reproductions of actual case exhibits. Archerd was convicted of three murders; other deaths were investigated as suspected cases. This ending is a narrative device, not a claim about a specific historical prosecution.</p><div class="modal-actions"><button class="primary-button" id="replay-button">REOPEN THE CASE <span>↻</span></button><button class="text-button" id="finish-button">RETURN TO TITLE</button></div>`);
-  $('#replay-button').addEventListener('click', () => { closeModal(); beginNewGame(); });
-  $('#finish-button').addEventListener('click', () => { closeModal(); showTitle(); });
-  $('#chapter-label').textContent = 'CASE REVIEW';
-  $('#chapter-name').textContent = 'THE RECONSTRUCTION';
-  $('#chapter-number').textContent = '04';
-  $('#bottom-hint').textContent = 'The case is closed for now.';
-  renderSidebar();
-  drawScene();
-}
-
-function drawPixel(x: number, y: number, width: number, height: number, color: string): void {
-  ctx.fillStyle = color; ctx.fillRect(Math.round(x), Math.round(y), Math.round(width), Math.round(height));
-}
-function drawText(text: string, x: number, y: number, color = '#c6b89a', size = 10, font = 'monospace'): void {
-  ctx.fillStyle = color; ctx.font = `${size}px ${font}`; ctx.fillText(text, x, y);
-}
-function drawWindow(x: number, y: number, width: number, height: number, time: number): void {
-  drawPixel(x - 4, y - 4, width + 8, height + 8, '#171a1c');
-  drawPixel(x, y, width, height, '#1d3035');
-  drawPixel(x + 4, y + 5, width - 8, height - 10, '#263f45');
-  drawPixel(x + width / 2 - 2, y, 4, height, '#111719');
-  drawPixel(x, y + height / 2 - 2, width, 4, '#111719');
-  drawPixel(x + 9, y + 12, 8, 4, '#8d8a72');
-  drawPixel(x + width - 20, y + height - 24, 12, 6, '#a18b6c');
-  for (let i = 0; i < 18; i++) {
-    const rx = x + ((i * 37 + Math.floor(time * (25 + i % 4))) % width);
-    const ry = y + ((i * 19 + Math.floor(time * 58)) % height);
-    drawPixel(rx, ry, 1, 9 + (i % 3) * 3, 'rgba(174,194,184,.32)');
+  if (player.jumpBuffer > 0 && player.coyote > 0) {
+    player.vy = -JUMP;
+    player.grounded = false;
+    player.coyote = 0;
+    player.jumpBuffer = 0;
+    beep(420, 0.055);
   }
-}
-function drawBedroom(time: number): void {
-  drawPixel(0, 0, W, H, '#17191b');
-  drawPixel(0, 0, W, 168, '#242426');
-  // Wallpaper and wainscoting.
-  for (let y = 10; y < 158; y += 22) for (let x = 0; x < W; x += 32) drawPixel(x + ((y / 22) % 2) * 16, y, 1, 11, '#30302d');
-  drawPixel(0, 162, W, 5, '#615344'); drawPixel(0, 168, W, 18, '#302a25');
-  drawPixel(0, 186, W, 84, '#25221f');
-  for (let x = 0; x < W; x += 28) drawPixel(x, 186, 1, 84, '#2d2823');
-  // window and curtain.
-  drawWindow(183, 22, 101, 101, time);
-  drawPixel(173, 13, 10, 128, '#40332b'); drawPixel(285, 13, 10, 128, '#40332b');
-  drawPixel(167, 12, 126, 7, '#544438');
-  drawPixel(168, 16, 16, 123, '#4a3830'); drawPixel(281, 16, 15, 123, '#49372f');
-  drawPixel(169, 135, 126, 5, '#6a5743');
-  // bed and blanket.
-  drawPixel(292, 129, 145, 9, '#594838'); drawPixel(301, 138, 127, 47, '#3b3c39');
-  drawPixel(300, 132, 132, 14, '#a49378'); drawPixel(304, 139, 52, 10, '#b4a78d');
-  drawPixel(360, 139, 65, 37, '#48504d'); drawPixel(307, 184, 7, 16, '#171716'); drawPixel(417, 184, 7, 16, '#171716');
-  // nightstand.
-  drawPixel(348, 108, 76, 35, '#5b4735'); drawPixel(352, 111, 68, 4, '#7b6046'); drawPixel(353, 144, 5, 33, '#453627'); drawPixel(414, 144, 5, 33, '#453627');
-  drawPixel(355, 124, 61, 12, '#49392d'); drawPixel(380, 128, 3, 3, '#b09b75');
-  // desk and lamp.
-  drawPixel(45, 153, 128, 12, '#604a36'); drawPixel(52, 165, 112, 36, '#493a2e'); drawPixel(59, 201, 8, 29, '#342a23'); drawPixel(151, 201, 8, 29, '#342a23');
-  drawPixel(95, 135, 20, 19, '#c1a76c'); drawPixel(102, 121, 6, 16, '#887350'); drawPixel(94, 119, 22, 5, '#e0c78d');
-  drawPixel(93, 138, 22, 10, 'rgba(225,185,104,.12)');
-  // documents scattered.
-  drawPixel(58, 156, 30, 2, '#d6c7a3'); drawPixel(62, 160, 25, 1, '#9d927b');
-  drawPixel(129, 157, 18, 3, '#c5b58f'); drawPixel(130, 162, 17, 1, '#938a74');
-  // folder & medical envelope in foreground.
-  drawPixel(190, 178, 54, 27, '#89704f'); drawPixel(193, 174, 22, 7, '#a88e66'); drawPixel(198, 185, 35, 1, '#c3b18d');
-  drawPixel(276, 181, 54, 25, '#d2c9b2'); drawPixel(281, 185, 39, 1, '#8d8a7c'); drawPixel(281, 191, 32, 1, '#a7a08e');
-  // telephone and message pad.
-  drawPixel(78, 115, 33, 22, '#252728'); drawPixel(84, 109, 21, 8, '#383b3a'); drawPixel(88, 120, 13, 5, '#98907a');
-  drawPixel(76, 137, 38, 6, '#17191a');
-  // drawer and newspaper.
-  drawPixel(354, 113, 69, 24, '#624b37'); drawPixel(360, 119, 57, 13, '#3e3027'); drawPixel(386, 124, 5, 2, '#b69b6d');
-  // warm lamp falloff.
-  const glow = ctx.createRadialGradient(104, 143, 5, 104, 143, 110);
-  glow.addColorStop(0, 'rgba(222,169,91,.17)'); glow.addColorStop(1, 'rgba(222,169,91,0)'); ctx.fillStyle = glow; ctx.fillRect(0, 60, 230, 185);
-  // distant figure at the window, only after investigation pressure builds.
-  if (presence >= 3) {
-    const alpha = .18 + (Math.sin(time * 1.1) + 1) * .06;
-    ctx.fillStyle = `rgba(8,10,11,${alpha})`;
-    ctx.fillRect(220, 72, 9, 27); ctx.fillRect(216, 78, 17, 20); ctx.fillRect(219, 98, 4, 17); ctx.fillRect(227, 98, 4, 17);
-    drawPixel(221, 73, 2, 2, '#b7b2a0');
-  }
-  // vignette and floor shadow.
-  const vignette = ctx.createRadialGradient(240, 118, 52, 240, 135, 295);
-  vignette.addColorStop(0, 'rgba(0,0,0,0)'); vignette.addColorStop(1, 'rgba(0,0,0,.55)'); ctx.fillStyle = vignette; ctx.fillRect(0, 0, W, H);
-  drawText('NOV 06  /  11:42 PM', 12, 18, '#8a806f', 7);
-}
-function drawOffice(time: number): void {
-  drawPixel(0, 0, W, H, '#171a1b'); drawPixel(0, 0, W, 177, '#242729');
-  for (let x = 0; x < W; x += 38) drawPixel(x, 0, 2, 176, '#2d3030');
-  drawWindow(18, 22, 88, 112, time); drawPixel(13, 16, 98, 5, '#665440');
-  // cork board.
-  drawPixel(135, 25, 295, 139, '#594938'); drawPixel(141, 31, 283, 127, '#8c775a');
-  drawPixel(150, 40, 74, 44, '#d5c9ac'); drawPixel(234, 40, 73, 44, '#d5c9ac'); drawPixel(320, 40, 90, 44, '#d0c2a4');
-  drawPixel(153, 47, 65, 2, '#847c6a'); drawPixel(153, 53, 46, 1, '#a39a82'); drawPixel(239, 47, 62, 2, '#807967'); drawPixel(239, 54, 57, 1, '#a29a86');
-  drawPixel(325, 47, 78, 2, '#867a62'); drawPixel(325, 54, 65, 1, '#9b927c');
-  drawPixel(183, 89, 88, 54, '#c7b99b'); drawPixel(188, 96, 78, 1, '#817a69'); drawPixel(188, 103, 67, 1, '#948b77');
-  drawPixel(293, 91, 101, 52, '#d0c5aa'); drawPixel(299, 98, 89, 1, '#827b6a'); drawPixel(299, 105, 72, 1, '#948a74');
-  // red string.
-  ctx.strokeStyle = '#a34f40'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(185, 82); ctx.lineTo(240, 88); ctx.lineTo(333, 84); ctx.lineTo(341, 94); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(192, 87); ctx.lineTo(239, 116); ctx.lineTo(297, 117); ctx.stroke();
-  for (const [x, y] of [[185, 82], [240, 88], [333, 84], [192, 87], [297, 117]] as const) drawPixel(x, y, 4, 4, '#b84f43');
-  // desk.
-  drawPixel(0, 184, W, 86, '#28231e'); drawPixel(22, 177, 435, 14, '#70563f'); drawPixel(39, 191, 401, 52, '#4a392c');
-  drawPixel(63, 197, 110, 29, '#b9a987'); drawPixel(69, 203, 95, 1, '#746c59'); drawPixel(69, 211, 74, 1, '#92866d');
-  drawPixel(196, 191, 102, 45, '#a8916b'); drawPixel(203, 197, 83, 2, '#685d4b'); drawPixel(203, 204, 74, 1, '#776d58');
-  drawPixel(336, 193, 68, 31, '#292b2a'); drawPixel(347, 185, 46, 9, '#b99a5e'); drawPixel(365, 169, 9, 19, '#786448');
-  const glow = ctx.createRadialGradient(365, 184, 3, 365, 184, 100); glow.addColorStop(0, 'rgba(226,170,89,.22)'); glow.addColorStop(1, 'rgba(226,170,89,0)'); ctx.fillStyle = glow; ctx.fillRect(245, 110, 210, 150);
-  drawPixel(0, 247, W, 23, '#151617'); drawText('PROPERTY ROOM  /  TEMPORARY OFFICE', 13, 18, '#8b806f', 7);
-  drawText(`EVIDENCE RECORDED: ${collected.size.toString().padStart(2, '0')}`, 15, 258, '#a99a7c', 7);
-}
-function drawInterview(time: number): void {
-  drawPixel(0, 0, W, H, '#161819'); drawPixel(0, 0, W, 167, '#242728'); drawPixel(0, 168, W, 102, '#191b1c');
-  drawWindow(22, 20, 87, 102, time); drawPixel(17, 14, 97, 7, '#675541');
-  // overhead light pool.
-  const pool = ctx.createRadialGradient(240, 8, 3, 240, 8, 190); pool.addColorStop(0, 'rgba(203,176,125,.19)'); pool.addColorStop(1, 'rgba(203,176,125,0)'); ctx.fillStyle = pool; ctx.fillRect(20, 0, 440, 220);
-  // table.
-  drawPixel(53, 172, 374, 15, '#68513b'); drawPixel(66, 187, 347, 32, '#4a392b'); drawPixel(82, 219, 12, 34, '#30261f'); drawPixel(386, 219, 12, 34, '#30261f');
-  // Archerd silhouette.
-  drawPixel(209, 71, 64, 70, '#111314'); drawPixel(222, 48, 39, 38, '#17191a'); drawPixel(228, 55, 27, 19, '#a99b80'); drawPixel(224, 46, 34, 10, '#c2b49b');
-  drawPixel(205, 105, 81, 61, '#222627'); drawPixel(216, 121, 59, 41, '#343637'); drawPixel(237, 94, 5, 3, '#ddd0ad'); drawPixel(251, 94, 5, 3, '#ddd0ad');
-  // detective silhouette foreground.
-  drawPixel(63, 104, 92, 76, '#101213'); drawPixel(89, 82, 48, 39, '#16191a'); drawPixel(87, 75, 52, 12, '#262522');
-  drawPixel(315, 104, 102, 76, '#111314'); drawPixel(339, 84, 54, 32, '#181b1c');
-  drawText('RECORDED INTERVIEW', 15, 18, '#9a8d76', 7); drawText('JUL 12  /  1967', 386, 18, '#9a8d76', 7);
-  const flicker = Math.sin(time * 9) > .98 ? .05 : 0; ctx.fillStyle = `rgba(245,220,170,${flicker})`; ctx.fillRect(0, 0, W, H);
-}
-function drawReconstruction(time: number): void {
-  drawPixel(0, 0, W, H, '#0f1416'); drawPixel(0, 0, W, 270, '#1a2223');
-  drawWindow(156, 23, 168, 156, time * .55);
-  drawPixel(0, 186, W, 84, '#111516'); drawPixel(23, 182, 434, 9, '#514538');
-  // empty chair, file, and a light left burning.
-  drawPixel(73, 151, 78, 9, '#5c4835'); drawPixel(80, 160, 64, 43, '#45392f'); drawPixel(86, 202, 8, 32, '#302822'); drawPixel(133, 202, 8, 32, '#302822');
-  drawPixel(320, 154, 81, 7, '#9a825b'); drawPixel(329, 160, 63, 35, '#796245'); drawPixel(338, 194, 8, 28, '#473a2b'); drawPixel(377, 194, 8, 28, '#473a2b');
-  drawPixel(354, 127, 17, 27, '#dbc08a'); drawPixel(359, 117, 7, 12, '#7d694b');
-  const glow = ctx.createRadialGradient(363, 139, 4, 363, 139, 122); glow.addColorStop(0, 'rgba(222,174,102,.20)'); glow.addColorStop(1, 'rgba(222,174,102,0)'); ctx.fillStyle = glow; ctx.fillRect(240, 20, 220, 240);
-  drawText('WHAT THE RECORD CAN PROVE', 16, 18, '#9a907f', 7);
-}
 
-function drawScene(): void {
-  if (!ctx || $('#play-screen').classList.contains('hidden')) return;
-  ctx.save(); ctx.scale(2, 2);
-  if (currentScene === 'bedroom') drawBedroom(elapsed);
-  else if (currentScene === 'office') drawOffice(elapsed);
-  else if (currentScene === 'interview') drawInterview(elapsed);
-  else drawReconstruction(elapsed);
-  if (currentScene === 'bedroom') {
-    for (const spot of hotspots) {
-      const isFound = Boolean(spot.evidenceId && collected.has(spot.evidenceId));
-      const isHovered = hoveredHotspot === spot.id;
-      if (isFound) { drawPixel(spot.x + spot.w / 2 - 2, spot.y + spot.h / 2 - 2, 4, 4, '#8f9b82'); continue; }
-      if (isHovered) {
-        ctx.strokeStyle = 'rgba(222,190,129,.9)'; ctx.lineWidth = .9; ctx.setLineDash([3, 2]); ctx.strokeRect(spot.x + 1, spot.y + 1, spot.w - 2, spot.h - 2); ctx.setLineDash([]);
-        drawText(spot.label.toUpperCase(), Math.max(4, spot.x - 3), Math.max(12, spot.y - 6), '#e1d1ad', 6);
+  player.vy = Math.min(MAX_FALL, player.vy + GRAVITY * dt);
+  movePlayer(dt);
+
+  for (const enemy of level.enemies) {
+    if (!enemy.alive) continue;
+    enemy.x += enemy.vx * dt;
+    if (enemy.x <= enemy.minX || enemy.x + enemy.w >= enemy.maxX) enemy.vx *= -1;
+    if (rectsOverlap(player, enemy) && player.invuln <= 0) {
+      const stomp = player.vy > 80 && player.y + player.h - 8 < enemy.y + 12;
+      if (stomp) {
+        enemy.alive = false;
+        player.vy = -JUMP * 0.48;
+        score += 250;
+        beep(130, 0.09);
+      } else {
+        hurtPlayer();
       }
     }
   }
-  // Subtle scanline texture.
-  ctx.fillStyle = 'rgba(0,0,0,.055)'; for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
-  ctx.restore();
-}
-function gameLoop(timestamp: number): void {
-  const dt = Math.min((timestamp - lastFrame) / 1000 || 0, .05); lastFrame = timestamp; elapsed += dt;
-  if (currentScene === 'bedroom' || currentScene === 'office' || currentScene === 'interview' || currentScene === 'reconstruction') drawScene();
-  animationFrame = requestAnimationFrame(gameLoop);
+
+  for (const coin of level.coins) {
+    if (!coin.collected && rectsOverlap(player, coin)) {
+      coin.collected = true;
+      player.coins++;
+      totalCoins++;
+      score += 100;
+      beep(760, 0.045);
+    }
+  }
+
+  for (const power of level.powerups) {
+    if (!power.collected) {
+      power.y += Math.sin(elapsed * 4) * 0.12;
+      if (rectsOverlap(player, power)) {
+        power.collected = true;
+        player.power = 1;
+        score += 500;
+        beep(980, 0.12);
+      }
+    }
+  }
+
+  for (const hazard of level.hazards) {
+    if (rectsOverlap(player, hazard)) {
+      hurtPlayer();
+      break;
+    }
+  }
+
+  if (player.y > H + 150) hurtPlayer();
+
+  if (rectsOverlap(player, level.exit)) {
+    if (levelIndex < levels.length - 1) {
+      score += 1000;
+      levelIndex++;
+      resetLevel(true);
+      updateHud();
+      beep(520, 0.12);
+    } else {
+      score += 5000;
+      state = 'win';
+      showOverlay('YOU MADE IT', 'The last door was only the beginning.', 'PLAY AGAIN');
+      beep(880, 0.18);
+    }
+  }
+
+  cameraX += ((player.x - W * 0.38) - cameraX) * Math.min(1, dt * 6);
+  cameraX = Math.max(0, Math.min(level.width - W, cameraX));
+  updateHud();
 }
 
-function pointerToCanvas(event: PointerEvent): { x: number; y: number } {
-  const rect = canvas.getBoundingClientRect();
-  return { x: ((event.clientX - rect.left) / rect.width) * W, y: ((event.clientY - rect.top) / rect.height) * H };
-}
-function hitHotspot(point: { x: number; y: number }): Hotspot | undefined {
-  return hotspots.find((spot) => point.x >= spot.x && point.x <= spot.x + spot.w && point.y >= spot.y && point.y <= spot.y + spot.h && !(spot.evidenceId && collected.has(spot.evidenceId)));
-}
-canvas.addEventListener('pointermove', (event) => {
-  const point = pointerToCanvas(event); const hit = currentScene === 'bedroom' ? hitHotspot(point) : undefined;
-  const next = hit?.id ?? null;
-  if (next !== hoveredHotspot) { hoveredHotspot = next; canvas.style.cursor = next ? 'pointer' : 'default'; drawScene(); }
-});
-canvas.addEventListener('pointerleave', () => { hoveredHotspot = null; canvas.style.cursor = 'default'; drawScene(); });
-canvas.addEventListener('pointerup', (event) => {
-  if (modalOpen || currentScene !== 'bedroom') return;
-  const spot = hitHotspot(pointerToCanvas(event));
-  if (spot?.evidenceId) inspectEvidence(spot.evidenceId);
-});
+function movePlayer(dt: number): void {
+  player.x += player.vx * dt;
+  resolveHorizontal();
+  const oldY = player.y;
+  player.y += player.vy * dt;
+  player.grounded = false;
 
-function updateSoundButton(): void {
-  $('#sound-toggle').classList.toggle('enabled', soundEnabled);
-  $('#sound-toggle').textContent = soundEnabled ? '♫' : '◖';
-  $('#sound-toggle').setAttribute('aria-label', soundEnabled ? 'Mute ambience' : 'Enable ambience');
+  for (const p of level.platforms) {
+    if (!rectsOverlap(player, p)) continue;
+    if (player.vy >= 0 && oldY + player.h <= p.y + 8) {
+      player.y = p.y - player.h;
+      player.vy = 0;
+      player.grounded = true;
+    } else if (player.vy < 0 && oldY >= p.y + p.h - 8) {
+      player.y = p.y + p.h;
+      player.vy = 0;
+    }
+  }
+  player.x = Math.max(0, Math.min(level.width - player.w, player.x));
 }
-async function startAudio(): Promise<void> {
-  if (!soundEnabled) return;
+
+function resolveHorizontal(): void {
+  for (const p of level.platforms) {
+    if (!rectsOverlap(player, p)) continue;
+    if (player.vx > 0) player.x = p.x - player.w;
+    else if (player.vx < 0) player.x = p.x + p.w;
+    player.vx = 0;
+  }
+}
+
+function hurtPlayer(): void {
+  if (player.invuln > 0) return;
+  player.lives--;
+  beep(85, 0.18);
+  if (player.lives <= 0) {
+    state = 'gameover';
+    showOverlay('GAME OVER', 'The night always gets another turn.', 'TRY AGAIN');
+    return;
+  }
+  player.x = player.spawn.x;
+  player.y = player.spawn.y;
+  player.vx = 0;
+  player.vy = 0;
+  player.invuln = 1.4;
+  cameraX = Math.max(0, player.x - 250);
+}
+
+function draw(): void {
+  const levelColor = level.sky;
+  g.fillStyle = levelColor;
+  g.fillRect(0, 0, W, H);
+
+  drawParallax();
+  g.save();
+  g.translate(-Math.floor(cameraX), 0);
+  drawWorld();
+  g.restore();
+
+  drawVignette();
+  if (state === 'paused') {
+    g.fillStyle = 'rgba(5,6,10,.62)';
+    g.fillRect(0, 0, W, H);
+    text('PAUSED', W / 2, H / 2 - 12, 34, '#fff2c7', 'center');
+    text('PRESS P OR ESC TO RESUME', W / 2, H / 2 + 28, 11, '#b8b3a6', 'center');
+  }
+}
+
+function drawParallax(): void {
+  const layers = [
+    { speed: .12, base: 410, color: '#171c27' },
+    { speed: .22, base: 430, color: '#121722' },
+    { speed: .38, base: 455, color: '#0d111a' },
+  ];
+  for (const layer of layers) {
+    const shift = (cameraX * layer.speed) % 180;
+    g.fillStyle = layer.color;
+    for (let x = -180 - shift; x < W + 180; x += 180) {
+      const h = 70 + ((Math.abs(Math.floor(x / 180)) * 17) % 80);
+      g.fillRect(x, layer.base - h, 120, h);
+      g.fillRect(x + 22, layer.base - h - 20, 58, 20);
+    }
+  }
+  for (let i = 0; i < 45; i++) {
+    const x = ((i * 173 - cameraX * .55) % (W + 40)) - 20;
+    const y = (i * 71) % 430;
+    g.fillStyle = i % 4 ? 'rgba(180,205,220,.22)' : 'rgba(255,235,185,.4)';
+    g.fillRect(x, y, 1, 7);
+  }
+}
+
+function drawWorld(): void {
+  for (const p of level.platforms) {
+    g.fillStyle = '#252938';
+    g.fillRect(p.x, p.y, p.w, p.h);
+    g.fillStyle = '#5d6174';
+    g.fillRect(p.x, p.y, p.w, 5);
+    g.fillStyle = '#151722';
+    for (let x = p.x + 8; x < p.x + p.w; x += 34) g.fillRect(x, p.y + 12, 2, Math.min(12, p.h - 14));
+  }
+
+  for (const h of level.hazards) {
+    g.fillStyle = '#401f31';
+    g.fillRect(h.x, h.y, h.w, h.h);
+    g.fillStyle = '#bd5571';
+    for (let x = h.x; x < h.x + h.w; x += 16) {
+      g.beginPath();
+      g.moveTo(x, h.y + h.h);
+      g.lineTo(x + 8, h.y);
+      g.lineTo(x + 16, h.y + h.h);
+      g.closePath();
+      g.fill();
+    }
+  }
+
+  for (const coin of level.coins) if (!coin.collected) drawCoin(coin);
+  for (const power of level.powerups) if (!power.collected) drawPower(power);
+  for (const enemy of level.enemies) if (enemy.alive) drawEnemy(enemy);
+  drawExit(level.exit);
+  drawPlayer();
+}
+
+function drawPlayer(): void {
+  if (player.invuln > 0 && Math.floor(elapsed * 18) % 2 === 0) return;
+  const x = Math.round(player.x);
+  const y = Math.round(player.y);
+  const coat = player.power ? '#d7b36a' : '#8fb0b7';
+  g.fillStyle = '#0b0c11';
+  g.fillRect(x + 5, y + 6, 20, 29);
+  g.fillStyle = coat;
+  g.fillRect(x + 7, y + 16, 16, 18);
+  g.fillStyle = '#d8c3a2';
+  g.fillRect(x + 9, y + 4, 12, 13);
+  g.fillStyle = '#161923';
+  g.fillRect(x + (player.facing === 1 ? 17 : 9), y + 8, 4, 3);
+  g.fillStyle = '#0b0c11';
+  g.fillRect(x + 7, y + 34, 6, 8);
+  g.fillRect(x + 17, y + 34, 6, 8);
+  g.fillRect(x + (player.facing === 1 ? 23 : 1), y + 19, 6, 4);
+}
+
+function drawEnemy(e: Enemy): void {
+  const x = Math.round(e.x), y = Math.round(e.y);
+  g.fillStyle = '#351b2a';
+  g.fillRect(x + 3, y + 8, e.w - 6, e.h - 8);
+  g.fillStyle = '#9c4967';
+  g.fillRect(x + 6, y + 3, e.w - 12, 13);
+  g.fillStyle = '#f4c9a4';
+  g.fillRect(x + 9, y + 11, 4, 3);
+  g.fillRect(x + e.w - 13, y + 11, 4, 3);
+  g.fillStyle = '#160f16';
+  g.fillRect(x + 4, y + e.h - 5, 9, 5);
+  g.fillRect(x + e.w - 13, y + e.h - 5, 9, 5);
+}
+
+function drawCoin(c: Coin): void {
+  const bob = Math.sin(elapsed * 5 + c.phase) * 3;
+  g.fillStyle = '#f2c75c';
+  g.fillRect(c.x + 5, c.y + bob, 8, 18);
+  g.fillStyle = '#fff0a2';
+  g.fillRect(c.x + 7, c.y + 2 + bob, 3, 10);
+}
+
+function drawPower(p: PowerUp): void {
+  const bob = Math.sin(elapsed * 4) * 4;
+  g.fillStyle = '#8b5cff';
+  g.fillRect(p.x, p.y + bob, p.w, p.h);
+  g.fillStyle = '#f5d8ff';
+  g.fillRect(p.x + 5, p.y + 5 + bob, 16, 4);
+  g.fillRect(p.x + 5, p.y + 13 + bob, 16, 4);
+}
+
+function drawExit(r: Rect): void {
+  g.fillStyle = '#0a0b10';
+  g.fillRect(r.x, r.y, r.w, r.h);
+  g.fillStyle = '#6e8b8f';
+  g.fillRect(r.x + 5, r.y + 5, r.w - 10, 5);
+  g.fillStyle = '#d7b36a';
+  g.fillRect(r.x + r.w - 12, r.y + r.h / 2, 4, 4);
+  g.fillStyle = 'rgba(215,179,106,.18)';
+  g.fillRect(r.x - 20, r.y - 20, r.w + 40, r.h + 40);
+}
+
+function drawVignette(): void {
+  const grad = g.createRadialGradient(W / 2, H / 2, 160, W / 2, H / 2, 620);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,.55)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, W, H);
+}
+
+function text(value: string, x: number, y: number, size: number, color: string, align: CanvasTextAlign = 'left'): void {
+  g.font = `700 ${size}px "Arial Black", Impact, sans-serif`;
+  g.textAlign = align;
+  g.textBaseline = 'middle';
+  g.fillStyle = color;
+  g.fillText(value, x, y);
+}
+
+function updateHud(): void {
+  document.querySelector('#level-name')!.textContent = level.name;
+  document.querySelector('#score')!.textContent = String(score).padStart(6, '0');
+  document.querySelector('#coins')!.textContent = String(player.coins).padStart(2, '0');
+  document.querySelector('#lives')!.textContent = '♥'.repeat(player.lives) + '♡'.repeat(Math.max(0, 3 - player.lives));
+}
+
+function showOverlay(title: string, subtitle: string, button: string): void {
+  const overlay = document.querySelector<HTMLDivElement>('#overlay')!;
+  overlay.innerHTML = `
+    <div class="panel result-panel">
+      <p class="kicker">THE LAST VISITOR</p>
+      <h2>${title}</h2>
+      <p>${subtitle}</p>
+      <button id="result-button" class="arcade-button">${button} <span>→</span></button>
+      <p class="result-stats">SCORE ${String(score).padStart(6, '0')} · COINS ${totalCoins}</p>
+    </div>`;
+  overlay.classList.remove('hidden');
+  document.querySelector('#result-button')!.addEventListener('click', () => {
+    if (state === 'win') {
+      levelIndex = 0;
+      score = 0;
+      totalCoins = 0;
+    }
+    resetLevel(false);
+    state = 'playing';
+    overlay.classList.add('hidden');
+  });
+}
+
+function startGame(): void {
+  levelIndex = 0;
+  score = 0;
+  totalCoins = 0;
+  resetLevel(false);
+  state = 'playing';
+  document.querySelector('#overlay')!.classList.add('hidden');
+  startAudio();
+}
+
+function togglePause(): void {
+  if (state === 'playing') {
+    state = 'paused';
+  } else if (state === 'paused') {
+    state = 'playing';
+  }
+}
+
+function startAudio(): void {
+  if (audioEnabled || audio) return;
   try {
-    audioContext ??= new AudioContext();
-    if (audioContext.state === 'suspended') await audioContext.resume();
-    if (rainNode) return;
-    const buffer = audioContext.createBuffer(1, audioContext.sampleRate * 3, audioContext.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * .18;
-    rainNode = audioContext.createBufferSource(); rainNode.buffer = buffer; rainNode.loop = true;
-    const filter = audioContext.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 460;
-    rainGain = audioContext.createGain(); rainGain.gain.value = .11;
-    rainNode.connect(filter); filter.connect(rainGain); rainGain.connect(audioContext.destination); rainNode.start();
-  } catch { showToast('Audio is unavailable in this browser.'); soundEnabled = false; updateSoundButton(); }
-}
-function stopAudio(): void {
-  try { rainNode?.stop(); } catch { /* already stopped */ }
-  rainNode = null; rainGain = null;
+    audio = new AudioContext();
+    audioEnabled = true;
+  } catch { /* sound remains optional */ }
 }
 
-$('#new-game').addEventListener('click', beginNewGame);
-$('#continue-game').addEventListener('click', continueGame);
-$('#back-button').addEventListener('click', showTitle);
-$('#journal-button').addEventListener('click', showJournal);
-$('#board-button').addEventListener('click', openBoard);
-$('#advance-button').addEventListener('click', () => {
-  if (currentScene === 'bedroom') {
-    if (collected.size < 3) return;
-    switchScene('office'); showToast('The records have been brought back to the office.');
-  } else if (currentScene === 'office') {
-    switchScene('interview'); openInterview();
-  } else if (currentScene === 'interview') {
-    switchScene('reconstruction'); showReconstruction();
-  } else showReconstruction();
-});
-$('#sound-toggle').addEventListener('click', async () => {
-  soundEnabled = !soundEnabled; updateSoundButton();
-  if (soundEnabled) await startAudio(); else stopAudio();
-  persist();
-});
-$('#help-button').addEventListener('click', () => openModal(`<p class="eyebrow">FIELD NOTES / CONTROLS</p><h2 id="modal-title">How to investigate</h2><div class="control-list"><div><kbd>CLICK</kbd><span>Inspect an object or choose a dialogue topic.</span></div><div><kbd>E</kbd><span>Inspect the object currently under the pointer.</span></div><div><kbd>I</kbd><span>Open the case inventory.</span></div><div><kbd>J</kbd><span>Open the investigation journal.</span></div><div><kbd>B</kbd><span>Open the evidence board.</span></div><div><kbd>ESC</kbd><span>Close the active panel or return to the title screen.</span></div></div><p class="modal-intro">There is no timer. Take your time. A connection is a lead to investigate, not automatic proof.</p><div class="modal-actions"><button class="primary-button" id="help-close">UNDERSTOOD <span>↗</span></button></div>`));
-$('#modal-close').addEventListener('click', closeModal);
-$('#modal-layer').addEventListener('click', (event) => { if (event.target === $('#modal-layer')) closeModal(); });
+function beep(freq: number, duration: number): void {
+  if (!audioEnabled || !audio) return;
+  const osc = audio.createOscillator();
+  const gain = audio.createGain();
+  osc.frequency.value = freq;
+  osc.type = 'square';
+  gain.gain.setValueAtTime(.035, audio.currentTime);
+  gain.gain.exponentialRampToValueAtTime(.001, audio.currentTime + duration);
+  osc.connect(gain).connect(audio.destination);
+  osc.start();
+  osc.stop(audio.currentTime + duration);
+}
 
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') { if (modalOpen) closeModal(); else if (!$('#play-screen').classList.contains('hidden')) showTitle(); }
-  if (modalOpen) return;
-  if (event.key.toLowerCase() === 'j' && !$('#play-screen').classList.contains('hidden')) showJournal();
-  if (event.key.toLowerCase() === 'b' && !$('#play-screen').classList.contains('hidden')) openBoard();
-  if (event.key.toLowerCase() === 'i' && !$('#play-screen').classList.contains('hidden')) showJournal();
-  if (event.key.toLowerCase() === 'e' && hoveredHotspot && currentScene === 'bedroom') {
-    const spot = hotspots.find((item) => item.id === hoveredHotspot); if (spot?.evidenceId) inspectEvidence(spot.evidenceId);
+function loop(now: number): void {
+  const dt = Math.min(0.033, (now - lastTime) / 1000);
+  lastTime = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+document.querySelector('#start')?.addEventListener('click', startGame);
+document.querySelector('#sound')?.addEventListener('click', () => {
+  if (!audioEnabled) startAudio();
+  else if (audio) audioEnabled = !audioEnabled;
+});
+
+window.addEventListener('keydown', (event) => {
+  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', ' ', 'a', 'd', 'w', 'p', 'Escape'].includes(key)) event.preventDefault();
+  if (key === 'p' || key === 'Escape') {
+    if (state === 'playing' || state === 'paused') togglePause();
+    return;
+  }
+  if (key === ' ' || key === 'ArrowUp' || key === 'w') requestJump();
+  keys.add(key);
+});
+
+window.addEventListener('keyup', (event) => {
+  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  keys.delete(key);
+});
+
+document.querySelectorAll<HTMLButtonElement>('[data-touch]').forEach(button => {
+  const kind = button.dataset.touch;
+  const set = (value: boolean) => {
+    if (kind === 'left') touchLeft = value;
+    if (kind === 'right') touchRight = value;
+    if (kind === 'jump' && value) touchJump = true;
+  };
+  button.addEventListener('pointerdown', () => set(true));
+  button.addEventListener('pointerup', () => set(false));
+  button.addEventListener('pointerleave', () => set(false));
+  button.addEventListener('pointercancel', () => set(false));
+});
+window.addEventListener('pointerup', () => {
+  touchLeft = false;
+  touchRight = false;
+  if (touchJump) {
+    requestJump();
+    touchJump = false;
   }
 });
 
-// The help and journal buttons are rendered dynamically inside modal content.
-document.addEventListener('click', (event) => {
-  const target = event.target as HTMLElement;
-  if (target.id === 'help-close') closeModal();
-});
-
-const saved = loadSave();
-$('#continue-game').classList.toggle('hidden', !saved);
-updateSoundButton();
-showTitle();
-renderSidebar();
-if (saved?.soundEnabled) { soundEnabled = false; updateSoundButton(); }
-window.addEventListener('resize', () => drawScene());
-window.addEventListener('beforeunload', () => { cancelAnimationFrame(animationFrame); stopAudio(); });
-animationFrame = requestAnimationFrame(gameLoop);
+requestAnimationFrame(loop);
