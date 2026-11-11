@@ -228,8 +228,7 @@ app.innerHTML = `
 const gameCanvas = document.querySelector<HTMLCanvasElement>('#game-canvas')!;
 gameCanvas.width = W;
 gameCanvas.height = H;
-const g = gameCanvas.getContext('2d');
-if (!g) throw new Error('Canvas context unavailable.');
+const g = gameCanvas.getContext('2d')!;
 g.imageSmoothingEnabled = false;
 
 function makePlayer(spawn: Vec): Player {
