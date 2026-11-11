@@ -34,16 +34,8 @@ type Level = {
   sky: string;
 };
 
-const canvas = document.querySelector<HTMLCanvasElement>('#game-canvas');
-if (!canvas) throw new Error('Canvas missing.');
-const ctx = canvas.getContext('2d');
-if (!ctx) throw new Error('Canvas context unavailable.');
-ctx.imageSmoothingEnabled = false;
-
 const W = 960;
 const H = 540;
-canvas.width = W;
-canvas.height = H;
 
 const GRAVITY = 1900;
 const RUN = 285;
@@ -234,7 +226,10 @@ app.innerHTML = `
 `;
 
 const gameCanvas = document.querySelector<HTMLCanvasElement>('#game-canvas')!;
-const g = gameCanvas.getContext('2d')!;
+gameCanvas.width = W;
+gameCanvas.height = H;
+const g = gameCanvas.getContext('2d');
+if (!g) throw new Error('Canvas context unavailable.');
 g.imageSmoothingEnabled = false;
 
 function makePlayer(spawn: Vec): Player {
