@@ -139,7 +139,7 @@ const levels: Level[] = [
   },
   {
     name: 'THE LAST DOOR',
-    subtitle: 'DON'T LOOK BACK',
+    subtitle: "DON'T LOOK BACK",
     width: 5600,
     sky: '#100f18',
     spawn: { x: 90, y: 360 },
